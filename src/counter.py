@@ -1,5 +1,6 @@
 from pyimagesearch.centroidtracker import CentroidTracker
 from pyimagesearch.trackableobject import TrackableObject
+from line import Line
 from imutils.video import VideoStream
 from imutils.video import FPS
 import numpy as np
@@ -20,8 +21,8 @@ class Counter:
         self.videoInput = "videos/example_01.mp4"
         self.skipFrames = 30
         self.confidence = 0.4
-        self.coordinateList = list()
-
+        self.lines =[]
+        self.recordDuration = 15
     def loadModel(self):
         # load our serialized model from disk
         print("[INFO] loading model...")
@@ -43,10 +44,24 @@ class Counter:
 
     def draw_shape(self,event,x,y,flag,parm):
         if event == cv2.EVENT_LBUTTONDOWN:
-            print('Cliked: ', (x,y))
-            x2,y2 = x,y
-            self.coordinateList.append(x2)
-            self.coordinateList.append(y2)
+            if not self.lines or self.lines[-1].complete:
+                newLine = Line(len(self.lines),x,y,0)
+                self.lines.append(newLine)
+            else:
+                self.lines[-1].addSecondCoordinates(x,y)
+        if event == cv2.EVENT_RBUTTONDOWN:
+            if not self.lines or self.lines[-1].complete:
+                newLine = Line(len(self.lines),x,y,1)
+                self.lines.append(newLine)
+            else:
+                self.lines[-1].addSecondCoordinates(x,y)
+                
+    
+    def ccw(self,A,B,C):
+        return (C[1]-A[1]) * (B[0]-A[0]) > (B[1]-A[1]) * (C[0]-A[0])
+
+    def intersect(self,A,B,C,D):
+        return self.ccw(A,C,D) != self.ccw(B,C,D) and self.ccw(A,B,C) != self.ccw(A,B,D)
 
     def coreCounter(self):
         #load model and video for process
@@ -62,13 +77,11 @@ class Counter:
         ct = CentroidTracker(maxDisappeared=40, maxDistance=50)
         trackers = []
         trackableObjects = {}
-        x2,y2 = -1,-1
-        coordinateList = list()
         #Total values for late informations
         totalFrames = 0
         totalDown = 0
         totalUp = 0
-
+        record = 0
         #Start fps
         fps = FPS().start()
         
@@ -87,6 +100,7 @@ class Counter:
 
             if W is None or H is None:
                 (H, W) = frame.shape[:2]
+                print(H,W)
 
             status = "Waiting"
             rects = []
@@ -133,7 +147,8 @@ class Counter:
 
                     rects.append((startX, startY, endX, endY))
 
-            cv2.line(frame, (0, H // 2), (W, H // 2), (0,255, 255), 2)
+
+
 
             objects = ct.update(rects)
 
@@ -146,11 +161,30 @@ class Counter:
 
                 else:
                     y =[c[1] for c in  to.centroids]
+                    if len(to.centroids) > 1:
+                        p1, p2 = to.centroids[-2:]
+                        for i in self.lines:
+                            if i.complete:
+                                check = self.intersect([i.x1,i.y1],[i.x2,i.y2],p1,p2)
+                                if check:
+                                    if i.type == 0:
+                                        print([i.x1,i.y1],[i.x2,i.y2],p1,p2, check)   
+                                        i.itPassed()
+                                    else:
+                                        print("alert")
+                                        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                                        start = time.time()
+                                        outputPath = "output/"+str(start)+".mp4"
+                                        writer = cv2.VideoWriter(outputPath, fourcc,30,(W, H), True)
+                                        record = True
+                                        
+
+                    
+                        
                     direction = centroid[1] - np.mean(y)
                     to.centroids.append(centroid)
 
                     if not to.counted:
-
                         if direction < 0 and centroid[1] < H // 2:
                             totalUp += 1
                             to.counted = True
@@ -165,6 +199,7 @@ class Counter:
                 cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
+            
 
 
             info = [
@@ -178,18 +213,25 @@ class Counter:
                 cv2.putText(frame, text, (10, H - ((i*20)+20)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             
-            if writer is not None:
-                writer.writer(frame)
 
             cv2.setMouseCallback('Frame',self.draw_shape)
+            for i in self.lines:
+                if i.complete:
+                    if i.type == 0:
+                        cv2.line(frame, (i.x1, i.y1), (i.x2, i.y2), (255, 0, 0), 2)
+                        cv2.imshow("Frame", frame)
+                    elif i.type == 1:
+                        cv2.line(frame, (i.x1, i.y1), (i.x2, i.y2), (255, 255, 0), 2)
+                        cv2.imshow("Frame", frame)
 
-            if (len(self.coordinateList) % 4 == 0 and len(self.coordinateList) != 0):
-                temp = int(len(self.coordinateList) / 4)
-                for i in range(temp):
-                    cv2.line(frame, (self.coordinateList[i*4-4], self.coordinateList[i*4-3]), (self.coordinateList[i*4-2], self.coordinateList[i*4-1]), (255, 0, 0), 2)
-                    cv2.imshow("Frame", frame)
+                    
 
-
+            if(record):
+                writer.write(frame)
+                end = time.time()
+                if (end-start) > self.recordDuration:
+                    writer.release()
+                    record = False
 
             cv2.imshow("Frame", frame)
             key = cv2.waitKey(1) & 0xFF
