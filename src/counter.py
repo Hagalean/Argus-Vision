@@ -1,6 +1,7 @@
 from pyimagesearch.centroidtracker import CentroidTracker
 from pyimagesearch.trackableobject import TrackableObject
 from line import Line
+#from cameraSelector import CameraSelector
 from imutils.video import VideoStream
 from imutils.video import FPS
 import numpy as np
@@ -9,7 +10,11 @@ import imutils
 import time
 import dlib
 import cv2
+#import device
+
+from Camera_Information import Camera_Information
 #Arguments
+
 class Counter:
     def __init__(self):
         self.prototxt = "mobilenet_ssd/MobileNetSSD_deploy.prototxt"
@@ -23,6 +28,14 @@ class Counter:
         self.confidence = 0.4
         self.lines =[]
         self.recordDuration = 15
+
+        ln = Line(1,62,189,1)
+        ln.addSecondCoordinates(410,182)
+        self.lines.append(ln)
+        model = self.loadModel()
+        vs = self.loadVideo() #self.loadWebcam()
+        self.ci = Camera_Information(model, vs)
+
     def loadModel(self):
         # load our serialized model from disk
         print("[INFO] loading model...")
@@ -34,13 +47,17 @@ class Counter:
         print("[INFO] opening video file")
         vs = cv2.VideoCapture(self.videoInput)
         return vs
-    
+
     def loadWebcam(self):
         # load stream from webcam
+        '''
+        camSelector = CameraSelector("")
+        last_index = camSelector.getCamList()
+        vs =camSelector.select_camera(last_index)
+
         print("[INFO] starting video stream...")
-        vs = VideoStream(src=0).start()
         time.sleep(2.0)
-        return vs
+        return vs'''
 
     def draw_shape(self,event,x,y,flag,parm):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -66,9 +83,9 @@ class Counter:
     def coreCounter(self):
         #load model and video for process
         net = self.loadModel()
-        vs = self.loadVideo()
+        vs = self.loadVideo() #self.loadWebcam()
 
-        #writer will be used as video writer
+        # writer will be used as video writer
         writer = None
         #W and H are frame dimensions
         W = None
@@ -89,7 +106,8 @@ class Counter:
         while True:
             frame = vs.read()
             #if it is videostream change the value
-            frame = frame[1] #frame
+            frame = frame[1]
+            #frame = frame
 
             #if the video is over break the loop
             if self.videoInput is not None and frame is None:
@@ -112,6 +130,7 @@ class Counter:
                 blob = cv2.dnn.blobFromImage(frame, 0.007843,(W, H), 127.5)
                 net.setInput(blob)
                 detections = net.forward()
+
 
                 for i in np.arange(0, detections.shape[2]):
                     
@@ -174,7 +193,7 @@ class Counter:
                                         print("alert")
                                         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
                                         start = time.time()
-                                        outputPath = "output/"+str(start)+".mp4"
+                                        outputPath = "output/"+str(start)+".avi"
                                         writer = cv2.VideoWriter(outputPath, fourcc,30,(W, H), True)
                                         record = True
                                         
@@ -247,10 +266,146 @@ class Counter:
         print("[INFO] elapsed time: {:.2f}".format(fps.elapsed()))
         print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
         #change if it uses webcam
-        vs.release()  #vs.stop()
+        vs.release()
+        #vs.stop()
         cv2.destroyAllWindows()
 
 
+    def loop_function(self):
+        frame = self.ci.vs.read()
+        # if it is videostream change the value
+        frame = frame[1]
+        # frame = frame
 
+        # if the video is over break the loop
+        if self.videoInput is not None and frame is None:
+            return#break
 
-    
+        frame = imutils.resize(frame, width=500)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        if self.ci.W is None or self.ci.H is None:
+            (self.ci.H, self.ci.W) = frame.shape[:2]
+            print(self.ci.H, self.ci.W)
+
+        self.ci.status = "Waiting"
+        rects = []
+
+        if self.ci.totalFrames % self.skipFrames == 0:
+            self.ci.status = "Detecting"
+            self.ci.trackers = []
+
+            blob = cv2.dnn.blobFromImage(frame, 0.007843, (self.ci.W, self.ci.H), 127.5)
+            self.ci.net.setInput(blob)
+            detections = self.ci.net.forward()
+
+            for i in np.arange(0, detections.shape[2]):
+
+                confidence = detections[0, 0, i, 2]
+
+                if confidence > self.confidence:
+
+                    idx = int(detections[0, 0, i, 1])
+
+                    if self.CLASSES[idx] != "person":
+                        continue
+
+                    box = detections[0, 0, i, 3:7] * np.array([self.ci.W, self.ci.H, self.ci.W, self.ci.H])
+                    (startX, startY, endX, endY) = box.astype("int")
+
+                    tracker = dlib.correlation_tracker()
+                    rect = dlib.rectangle(startX, startY, endX, endY)
+                    tracker.start_track(rgb, rect)
+
+                    self.ci.trackers.append(tracker)
+
+        else:
+            for tracker in self.ci.trackers:
+                self.ci.status = "Tracking"
+
+                tracker.update(rgb)
+                pos = tracker.get_position()
+
+                startX = int(pos.left())
+                startY = int(pos.top())
+                endX = int(pos.right())
+                endY = int(pos.bottom())
+
+                rects.append((startX, startY, endX, endY))
+
+        objects = self.ci.ct.update(rects)
+
+        for (objectID, centroid) in objects.items():
+
+            to = self.ci.trackableObjects.get(objectID, None)
+
+            if to is None:
+                to = TrackableObject(objectID, centroid)
+
+            else:
+                y = [c[1] for c in to.centroids]
+                if len(to.centroids) > 1:
+                    p1, p2 = to.centroids[-2:]
+                    for i in self.lines:
+                        if i.complete:
+                            check = self.intersect([i.x1, i.y1], [i.x2, i.y2], p1, p2)
+                            if check:
+                                if i.type == 0:
+                                    print([i.x1, i.y1], [i.x2, i.y2], p1, p2, check)
+                                    i.itPassed()
+                                else:
+                                    print("alert")
+                                    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                                    start = time.time()
+                                    outputPath = "output/" + str(start) + ".avi"
+                                    writer = cv2.VideoWriter(outputPath, fourcc, 30, (self.ci.W, self.ci.H), True)
+                                    record = True
+
+                direction = centroid[1] - np.mean(y)
+                to.centroids.append(centroid)
+
+                if not to.counted:
+                    if direction < 0 and centroid[1] < self.ci.H // 2:
+                        self.ci.totalUp += 1
+                        to.counted = True
+
+                    elif direction > 0 and centroid[1] > self.ci.H // 2:
+                        self.ci.totalDown += 1
+                        to.counted = True
+
+            self.ci.trackableObjects[objectID] = to
+
+            text = "ID {}".format(objectID)
+            cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
+
+        info = [
+            ("Up", self.ci.totalUp),
+            ("Down", self.ci.totalDown),
+            ("Status", self.ci.status),
+        ]
+
+        for (i, (k, v)) in enumerate(info):
+            text = "{}: {}".format(k, v)
+            cv2.putText(frame, text, (10, self.ci.H - ((i * 20) + 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        cv2.setMouseCallback('Frame', self.draw_shape)
+        for i in self.lines:
+            if i.complete:
+                if i.type == 0:
+                    cv2.line(frame, (i.x1, i.y1), (i.x2, i.y2), (255, 0, 0), 2)
+                elif i.type == 1:
+                    cv2.line(frame, (i.x1, i.y1), (i.x2, i.y2), (255, 255, 0), 2)
+
+        if (self.ci.record):
+            self.ci.writer.write(frame)
+            end = time.time()
+            if (end - start) > self.recordDuration:
+                self.ci.writer.release()
+                record = False
+
+        self.ci.totalFrames += 1
+        return frame
+        #fps.update()

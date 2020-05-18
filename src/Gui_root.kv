@@ -1,0 +1,79 @@
+<SignInScreen>:
+    FloatLayout:
+
+
+<SignUpScreen>:
+    FloatLayout:
+
+<CameraSelectionScreen>:
+    FloatLayout:
+        Button:
+            text: 'Select Camera'
+            on_release:
+                root.set_vs()
+                root.manager.current = 'Stream'
+            size_hint: None, None
+            pos: (400, 400)
+            size: (200,50)
+
+<CameraStreamScreen>:
+    FloatLayout:
+        Button:
+            text: 'Statistics'
+            on_release: root.manager.current = 'Statistics'
+            size_hint: None, None
+            pos: (0, 0)
+            size: (200,50)
+        Button:
+            text: 'Edit Line'
+            on_release: root.manager.current = 'EditLine'
+            size_hint: None, None
+            pos: (250, 0)
+            size: (200,50)
+        Button:
+            text: 'Draw Line'
+            on_release: root.manager.current = 'DrawLine'
+            size_hint: None, None
+            pos: (500, 0)
+            size: (200,50)
+        Button:
+            text: 'Settings'
+            on_release: root.manager.current = 'Settings'
+            size_hint: None, None
+            pos: (750, 0)
+            size: (200,50)
+        Button:
+            text: 'Change Camera'
+            on_release:
+                root.manager.current = 'CamSelect'
+                root.delete_screen()
+            size_hint: None, None
+            pos: (1000, 0)
+            size: (50,50)
+
+
+<DrawLineScreen>:
+    BoxLayout:
+        Button:
+            text: 'Return Stream'
+            on_release: root.manager.current = 'Stream'
+
+<EditLineScreen>:
+    BoxLayout:
+        Button:
+            text: 'Return Stream'
+            on_release: root.manager.current = 'Stream'
+
+<StatisticsScreen>:
+    BoxLayout:
+        Button:
+            text: 'Return Stream'
+            on_release: root.manager.current = 'Stream'
+
+<SettingsScreen>:
+    BoxLayout:
+        Button:
+            text: 'Return Stream'
+        Button:
+            text: 'Back to menu'
+            on_release: root.manager.current = 'Stream'
